@@ -23,7 +23,8 @@ class TelegramHistoryReadError(TelegramLayerError):
 
 def to_utc_string(value: datetime) -> str:
     dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    dt = dt.astimezone(timezone.utc).replace(microsecond=0)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _slugify(value: str) -> str:
@@ -75,6 +76,7 @@ def build_chat_info(entity: object) -> ChatInfo:
 
     title = _entity_title(entity)
     username = getattr(entity, "username", None)
+
     return ChatInfo(
         id=int(entity_id),
         title=title,
@@ -110,12 +112,12 @@ def _entity_author(sender: object) -> str:
             return str(sender.title)
         if sender.username:
             return str(sender.username)
-        return f"channel_{sender.id}"
+        return "channel"
 
     if isinstance(sender, Chat):
         if sender.title:
             return str(sender.title)
-        return f"chat_{sender.id}"
+        return "chat"
 
     sender_id = getattr(sender, "id", None)
     if sender_id is not None:
@@ -140,9 +142,9 @@ async def _resolve_author(message) -> str:
     if sender is not None:
         return _entity_author(sender)
 
-    peer_id = getattr(message, "sender_id", None)
-    if peer_id is not None:
-        return f"user_{peer_id}"
+    sender_id = getattr(message, "sender_id", None)
+    if sender_id is not None:
+        return f"user_{sender_id}"
 
     if getattr(message, "post", False):
         return "channel"
@@ -151,23 +153,32 @@ async def _resolve_author(message) -> str:
 
 
 def _message_text(message) -> str:
-    text = getattr(message, "message", None)
-    if text is None:
-        text = getattr(message, "raw_text", None)
-    if text is None:
-        return ""
-    return str(text)
+    raw_text = getattr(message, "message", None)
+    if raw_text is None:
+        raw_text = getattr(message, "raw_text", None)
+
+    if raw_text is None:
+        return "[empty message]"
+
+    text = str(raw_text)
+    if text == "":
+        return "[empty message]"
+
+    return text
 
 
 async def _convert_message(message) -> ArchiveMessage:
+    message_date = message.date if message.date.tzinfo else message.date.replace(tzinfo=timezone.utc)
+    forwarded_from = getattr(message, "fwd_from", None)
+
     return ArchiveMessage(
         id=int(message.id),
-        date_utc=to_utc_string(message.date if message.date.tzinfo else message.date.replace(tzinfo=timezone.utc)),
+        date_utc=to_utc_string(message_date),
         author=await _resolve_author(message),
         text=_message_text(message),
         sender_id=getattr(message, "sender_id", None),
         reply_to_msg_id=getattr(message, "reply_to_msg_id", None),
-        forwarded_from=str(getattr(message, "fwd_from", None)) if getattr(message, "fwd_from", None) is not None else None,
+        forwarded_from=str(forwarded_from) if forwarded_from is not None else None,
         has_media=message.media is not None,
         is_service=getattr(message, "action", None) is not None,
     )
@@ -193,10 +204,10 @@ async def list_dialog_rows(client: TelegramClient, limit: int) -> list[tuple[str
 
 
 async def export_chat_archive(
-    client: TelegramClient,
-    chat_ref: str,
-    since: datetime | None = None,
-    until: datetime | None = None,
+        client: TelegramClient,
+        chat_ref: str,
+        since: datetime | None = None,
+        until: datetime | None = None,
 ) -> RawArchive:
     try:
         entity = await client.get_entity(chat_ref)
