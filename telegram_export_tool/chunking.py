@@ -1,10 +1,14 @@
 from datetime import datetime
 
+from telegram_export_tool.constants import (
+    CHUNK_MAX_CHARS,
+    CHUNK_SOFT_MIN_CHARS,
+    DATE_UTC_FORMAT,
+    FALLBACK_CHUNK_FILE_NAME,
+    MONTH_KEY_FORMAT,
+)
 from telegram_export_tool.formatting import group_messages_by_month, render_archive_message
 from telegram_export_tool.models import ArchiveMessage, ChunkDraft, ChunkInfo
-
-DATE_UTC_FORMAT = "%Y-%m-%d %H:%M:%S UTC"
-MONTH_KEY_FORMAT = "%m.%Y"
 
 
 def parse_date_utc(value: str) -> datetime:
@@ -103,8 +107,8 @@ def sort_messages_chronologically(messages: list[ArchiveMessage]) -> list[Archiv
 
 def build_chunk_drafts(
         messages: list[ArchiveMessage],
-        max_chars: int = 180_000,
-        soft_min_chars: int = 90_000,
+        max_chars: int = CHUNK_MAX_CHARS,
+        soft_min_chars: int = CHUNK_SOFT_MIN_CHARS,
 ) -> list[ChunkDraft]:
     if not messages:
         return []
@@ -191,7 +195,7 @@ def build_chunk_drafts(
 def build_chunk_summary(drafts: list[ChunkDraft]) -> list[ChunkInfo]:
     return [
         ChunkInfo(
-            file_name=draft.file_name or "chunk.txt",
+            file_name=draft.file_name or FALLBACK_CHUNK_FILE_NAME,
             start_month=draft.start_month,
             end_month=draft.end_month,
             part_index=draft.part_index,

@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 
 from telethon.tl.custom.message import Message
 
+from telegram_export_tool.constants import DATE_UTC_FORMAT, EMPTY_MESSAGE_PLACEHOLDER
 from telegram_export_tool.models import ArchiveMessage, ChatInfo
-
-DATE_UTC_FORMAT = "%Y-%m-%d %H:%M:%S UTC"
 
 
 def normalize_text(text: str) -> str:
@@ -94,7 +93,7 @@ def resolve_text(message: Message) -> str:
     if normalized:
         return normalized
 
-    return "[empty message]"
+    return EMPTY_MESSAGE_PLACEHOLDER
 
 
 def convert_message(message: Message) -> ArchiveMessage:

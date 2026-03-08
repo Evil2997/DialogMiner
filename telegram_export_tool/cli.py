@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from telegram_export_tool.config import Settings, load_settings
+from telegram_export_tool.constants import CHUNK_MAX_CHARS, CHUNK_SOFT_MIN_CHARS, DEFAULT_DIALOG_SCAN_LIMIT
 from telegram_export_tool.dialog_registry import (
     DialogRegistryError,
     load_saved_dialogs,
@@ -34,9 +35,6 @@ from telegram_export_tool.telegram_api import (
     list_dialog_rows,
     make_client,
 )
-
-MAX_CHARS = 180_000
-SOFT_MIN_CHARS = 90_000
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -94,8 +92,8 @@ def export_archive(archive: RawArchive) -> Path:
     chunks_dir, chunks_info = save_chunks(
         chat_dir,
         archive,
-        max_chars=MAX_CHARS,
-        soft_min_chars=SOFT_MIN_CHARS,
+        max_chars=CHUNK_MAX_CHARS,
+        soft_min_chars=CHUNK_SOFT_MIN_CHARS,
     )
 
     summary_path = save_summary(chat_dir, build_summary(archive, chunks_info))
@@ -150,8 +148,8 @@ def rebuild_chunks_for_archive(settings: Settings, archive: RawArchive) -> None:
         chunks_dir, chunks_info = save_chunks(
             chat_dir,
             archive,
-            max_chars=MAX_CHARS,
-            soft_min_chars=SOFT_MIN_CHARS,
+            max_chars=CHUNK_MAX_CHARS,
+            soft_min_chars=CHUNK_SOFT_MIN_CHARS,
         )
         save_summary(chat_dir, build_summary(archive, chunks_info))
     except StorageError as exc:
@@ -164,7 +162,7 @@ def rebuild_chunks_for_archive(settings: Settings, archive: RawArchive) -> None:
 
 @app.command("scan-dialogs")
 def scan_dialogs(
-    limit: int = typer.Option(100, help="How many dialogs to scan"),
+    limit: int = typer.Option(DEFAULT_DIALOG_SCAN_LIMIT, help="How many dialogs to scan"),
 ) -> None:
     async def run() -> None:
         settings = get_settings_or_exit()

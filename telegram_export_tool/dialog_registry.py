@@ -115,7 +115,7 @@ def save_saved_dialogs(rows: list[tuple[str, str, str]]) -> Path:
             encoding="utf-8",
         )
     except OSError as exc:
-        raise DialogRegistryWriteError(f"Failed to write saved dialogs registry: {path}") from exc
+        raise DialogRegistryWriteError(f"Failed to write saved dialogs: {path}") from exc
 
     return path
 
@@ -129,7 +129,7 @@ def load_saved_dialogs() -> list[tuple[str, str, str]]:
     try:
         data = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise DialogRegistryReadError(f"Failed to read saved dialogs registry: {path}") from exc
+        raise DialogRegistryReadError(f"Failed to read saved dialogs: {path}") from exc
 
     return _deserialize_rows(data, path)
 
@@ -139,18 +139,21 @@ def save_saved_dialogs_from_indexes(
         indexes: list[int],
 ) -> list[tuple[str, str, str]]:
     if not indexes:
-        raise ValueError("At least one dialog number must be provided.")
+        raise ValueError("At least one dialog index must be provided.")
 
-    unique_indexes: list[int] = []
-    seen: set[int] = set()
+    selected: list[tuple[str, str, str]] = []
+    seen_indexes: set[int] = set()
 
-    for index in indexes:
-        if index < 1 or index > len(scan_rows):
-            raise ValueError(f"Dialog number out of range: {index}")
-        if index not in seen:
-            unique_indexes.append(index)
-            seen.add(index)
+    for raw_index in indexes:
+        if raw_index in seen_indexes:
+            continue
+        seen_indexes.add(raw_index)
 
-    selected_rows = [scan_rows[index - 1] for index in unique_indexes]
-    save_saved_dialogs(selected_rows)
-    return selected_rows
+        zero_based_index = raw_index - 1
+        if zero_based_index < 0 or zero_based_index >= len(scan_rows):
+            raise ValueError(f"Dialog index out of range: {raw_index}")
+
+        selected.append(scan_rows[zero_based_index])
+
+    save_saved_dialogs(selected)
+    return selected

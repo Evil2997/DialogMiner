@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 
 from pydantic import ValidationError
+from telegram_export_tool.constants import FALLBACK_CHUNK_FILE_NAME
+from telegram_export_tool.paths import build_chunks_dir, build_full_archive_path, build_raw_messages_path, \
+    build_summary_path
 
 from telegram_export_tool.chunking import build_chunk_drafts, build_chunk_summary, sort_messages_chronologically
 from telegram_export_tool.formatting import render_full_archive
@@ -25,7 +28,7 @@ class StorageValidationError(StorageError):
 
 
 def ensure_output_chat_paths(chat_dir: Path) -> tuple[Path, Path]:
-    chunks_dir = chat_dir / "chunks"
+    chunks_dir = build_chunks_dir(chat_dir)
 
     try:
         chat_dir.mkdir(parents=True, exist_ok=True)
@@ -42,7 +45,7 @@ def ensure_output_paths(chat_dir: Path) -> tuple[Path, Path]:
 
 def save_raw_archive(chat_dir: Path, archive: RawArchive) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
-    path = chat_dir / "raw_messages.json"
+    path = build_raw_messages_path(chat_dir)
 
     try:
         path.write_text(
@@ -73,7 +76,7 @@ def load_raw_archive(path: Path) -> RawArchive:
 
 def save_full_archive(chat_dir: Path, archive: RawArchive) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
-    path = chat_dir / "full_archive.txt"
+    path = build_full_archive_path(chat_dir)
 
     try:
         path.write_text(render_full_archive(archive.messages), encoding="utf-8")
@@ -114,7 +117,7 @@ def save_chunks(
 
     try:
         for draft in drafts:
-            file_name = draft.file_name or "chunk.txt"
+            file_name = draft.file_name or FALLBACK_CHUNK_FILE_NAME
             (chunks_dir / file_name).write_text(draft.text, encoding="utf-8")
     except OSError as exc:
         raise StorageWriteError(f"Failed to write chunk files into: {chunks_dir}") from exc
@@ -125,7 +128,8 @@ def save_chunks(
 def build_summary(archive: RawArchive, chunks_info: list[ChunkInfo]) -> Summary:
     ordered_messages = sort_messages_chronologically(archive.messages)
     authors = {message.author for message in archive.messages if message.author}
-    text_messages = sum(1 for message in archive.messages if message.text != "[empty message]")
+    text_messages = sum(1 for message in archive.messages if
+                        message.text != FALLBACK_CHUNK_FILE_NAME.replace("chunk.txt", "[empty message]"))
     service_messages = sum(1 for message in archive.messages if message.is_service)
     media_messages = sum(1 for message in archive.messages if message.has_media)
     forwarded_messages = sum(1 for message in archive.messages if message.forwarded_from is not None)
@@ -148,7 +152,7 @@ def build_summary(archive: RawArchive, chunks_info: list[ChunkInfo]) -> Summary:
 
 def save_summary(chat_dir: Path, summary: Summary) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
-    path = chat_dir / "summary.json"
+    path = build_summary_path(chat_dir)
 
     try:
         path.write_text(
