@@ -1,11 +1,11 @@
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from telegram_export_tool.chunking import build_chunk_drafts, build_chunk_summary
+from telegram_export_tool.chunking import build_chunk_drafts, build_chunk_summary, sort_messages_chronologically
 from telegram_export_tool.formatting import render_full_archive
-from telegram_export_tool.models import RawArchive, Summary
+from telegram_export_tool.models import ChunkInfo, RawArchive, Summary
 
 
 class StorageError(Exception):
@@ -22,17 +22,6 @@ class StorageWriteError(StorageError):
 
 class StorageValidationError(StorageError):
     pass
-
-
-class SelectedDialogState(BaseModel):
-    title: str
-    id: int
-    type: str
-    slug: str
-    source_index: int | None = None
-    display_index: int | None = None
-    username: str | None = None
-    selected_at: str | None = None
 
 
 def ensure_output_chat_paths(chat_dir: Path) -> tuple[Path, Path]:
@@ -53,7 +42,6 @@ def ensure_output_paths(chat_dir: Path) -> tuple[Path, Path]:
 
 def save_raw_archive(chat_dir: Path, archive: RawArchive) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
-
     path = chat_dir / "raw_messages.json"
 
     try:
@@ -85,7 +73,6 @@ def load_raw_archive(path: Path) -> RawArchive:
 
 def save_full_archive(chat_dir: Path, archive: RawArchive) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
-
     path = chat_dir / "full_archive.txt"
 
     try:
@@ -96,7 +83,7 @@ def save_full_archive(chat_dir: Path, archive: RawArchive) -> Path:
     return path
 
 
-def plan_chunks(archive: RawArchive, max_chars: int, soft_min_chars: int) -> list:
+def plan_chunks(archive: RawArchive, max_chars: int, soft_min_chars: int) -> list[ChunkInfo]:
     drafts = build_chunk_drafts(
         messages=archive.messages,
         max_chars=max_chars,
@@ -105,7 +92,12 @@ def plan_chunks(archive: RawArchive, max_chars: int, soft_min_chars: int) -> lis
     return build_chunk_summary(drafts)
 
 
-def save_chunks(chat_dir: Path, archive: RawArchive, max_chars: int, soft_min_chars: int) -> tuple[Path, list]:
+def save_chunks(
+        chat_dir: Path,
+        archive: RawArchive,
+        max_chars: int,
+        soft_min_chars: int,
+) -> tuple[Path, list[ChunkInfo]]:
     _, chunks_dir = ensure_output_chat_paths(chat_dir)
 
     try:
@@ -130,13 +122,10 @@ def save_chunks(chat_dir: Path, archive: RawArchive, max_chars: int, soft_min_ch
     return chunks_dir, build_chunk_summary(drafts)
 
 
-def build_summary(archive: RawArchive, chunks_info: list) -> Summary:
-    authors = {message.author for message in archive.messages}
-    text_messages = sum(
-        1
-        for message in archive.messages
-        if message.text and not message.text.startswith("[empty message]")
-    )
+def build_summary(archive: RawArchive, chunks_info: list[ChunkInfo]) -> Summary:
+    ordered_messages = sort_messages_chronologically(archive.messages)
+    authors = {message.author for message in archive.messages if message.author}
+    text_messages = sum(1 for message in archive.messages if message.text != "[empty message]")
     service_messages = sum(1 for message in archive.messages if message.is_service)
     media_messages = sum(1 for message in archive.messages if message.has_media)
     forwarded_messages = sum(1 for message in archive.messages if message.forwarded_from is not None)
@@ -145,8 +134,8 @@ def build_summary(archive: RawArchive, chunks_info: list) -> Summary:
         chat=archive.chat,
         exported_at_utc=archive.exported_at_utc,
         total_messages=archive.total_messages,
-        first_message_date_utc=archive.messages[0].date_utc if archive.messages else None,
-        last_message_date_utc=archive.messages[-1].date_utc if archive.messages else None,
+        first_message_date_utc=ordered_messages[0].date_utc if ordered_messages else None,
+        last_message_date_utc=ordered_messages[-1].date_utc if ordered_messages else None,
         authors_count=len(authors),
         text_messages=text_messages,
         service_messages=service_messages,
@@ -159,7 +148,6 @@ def build_summary(archive: RawArchive, chunks_info: list) -> Summary:
 
 def save_summary(chat_dir: Path, summary: Summary) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
-
     path = chat_dir / "summary.json"
 
     try:

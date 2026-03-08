@@ -1,10 +1,12 @@
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
-import re
 
 from telethon.tl.custom.message import Message
 
 from telegram_export_tool.models import ArchiveMessage, ChatInfo
+
+DATE_UTC_FORMAT = "%Y-%m-%d %H:%M:%S UTC"
 
 
 def normalize_text(text: str) -> str:
@@ -16,11 +18,11 @@ def normalize_text(text: str) -> str:
 
 def to_utc_string(value: datetime) -> str:
     dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return dt.astimezone(timezone.utc).strftime(DATE_UTC_FORMAT)
 
 
 def month_key_from_utc_string(value: str) -> str:
-    dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S UTC")
+    dt = datetime.strptime(value, DATE_UTC_FORMAT)
     return dt.strftime("%m.%Y")
 
 
@@ -46,19 +48,25 @@ def build_chat_info(entity) -> ChatInfo:
 
 
 def resolve_author_name(message: Message) -> str:
-    if getattr(message, "post_author", None):
-        return normalize_text(str(message.post_author))
-
     sender = getattr(message, "sender", None)
+
     if sender is not None:
+        username = getattr(sender, "username", None)
+        if username:
+            return f"@{username}"
+
         first_name = getattr(sender, "first_name", "") or ""
         last_name = getattr(sender, "last_name", "") or ""
-        username = getattr(sender, "username", "") or ""
         full_name = f"{first_name} {last_name}".strip()
         if full_name:
             return normalize_text(full_name)
-        if username:
-            return f"@{username}"
+
+        title = getattr(sender, "title", None)
+        if title:
+            return normalize_text(str(title))
+
+    if getattr(message, "post_author", None):
+        return normalize_text(str(message.post_author))
 
     if getattr(message, "sender_id", None) is not None:
         return f"sender:{message.sender_id}"
@@ -82,15 +90,9 @@ def resolve_forwarded_from(message: Message) -> str | None:
 
 def resolve_text(message: Message) -> str:
     raw_text = getattr(message, "message", None) or getattr(message, "raw_text", None) or ""
-    raw_text = normalize_text(raw_text)
-    if raw_text:
-        return raw_text
-
-    if getattr(message, "action", None) is not None:
-        return f"[service: {message.action.__class__.__name__}]"
-
-    if getattr(message, "media", None) is not None:
-        return "[media message without text]"
+    normalized = normalize_text(raw_text)
+    if normalized:
+        return normalized
 
     return "[empty message]"
 
@@ -116,7 +118,16 @@ def render_archive_message(message: ArchiveMessage) -> str:
 def render_full_archive(messages: list[ArchiveMessage]) -> str:
     if not messages:
         return ""
-    return "\n".join(render_archive_message(message).rstrip() for message in messages).strip() + "\n"
+
+    ordered_messages = sorted(
+        messages,
+        key=lambda message: (
+            datetime.strptime(message.date_utc, DATE_UTC_FORMAT),
+            message.id,
+        ),
+    )
+
+    return "\n".join(render_archive_message(message).rstrip() for message in ordered_messages).strip() + "\n"
 
 
 def group_messages_by_month(messages: list[ArchiveMessage]) -> dict[str, list[ArchiveMessage]]:

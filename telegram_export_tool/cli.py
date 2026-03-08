@@ -35,6 +35,9 @@ from telegram_export_tool.telegram_api import (
     make_client,
 )
 
+MAX_CHARS = 180_000
+SOFT_MIN_CHARS = 90_000
+
 app = typer.Typer(add_completion=False)
 console = Console()
 
@@ -91,8 +94,8 @@ def export_archive(archive: RawArchive) -> Path:
     chunks_dir, chunks_info = save_chunks(
         chat_dir,
         archive,
-        max_chars=180_000,
-        soft_min_chars=90_000,
+        max_chars=MAX_CHARS,
+        soft_min_chars=SOFT_MIN_CHARS,
     )
 
     summary_path = save_summary(chat_dir, build_summary(archive, chunks_info))
@@ -138,6 +141,25 @@ def find_saved_archive_path(settings: Settings, entity_id: str) -> Path | None:
             return raw_json_path
 
     return None
+
+
+def rebuild_chunks_for_archive(settings: Settings, archive: RawArchive) -> None:
+    chat_dir = settings.chat_output_dir(archive.chat.slug)
+
+    try:
+        chunks_dir, chunks_info = save_chunks(
+            chat_dir,
+            archive,
+            max_chars=MAX_CHARS,
+            soft_min_chars=SOFT_MIN_CHARS,
+        )
+        save_summary(chat_dir, build_summary(archive, chunks_info))
+    except StorageError as exc:
+        print_storage_error(exc)
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
+    console.print(f"Files: {len(chunks_info)}")
 
 
 @app.command("scan-dialogs")
@@ -267,7 +289,6 @@ def export_saved() -> None:
                 )
 
                 export_archive(archive)
-
         finally:
             await client.disconnect()
 
@@ -293,21 +314,7 @@ def build_chunks(
             raise typer.Exit(code=1)
 
         archive = load_archive_or_exit(raw_json)
-        chat_dir = settings.chat_output_dir(archive.chat.slug)
-
-        try:
-            chunks_dir, chunks_info = save_chunks(
-                chat_dir,
-                archive,
-                max_chars=180_000,
-                soft_min_chars=90_000,
-            )
-        except StorageError as exc:
-            print_storage_error(exc)
-            raise typer.Exit(code=1) from exc
-
-        console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
-        console.print(f"Files: {len(chunks_info)}")
+        rebuild_chunks_for_archive(settings=settings, archive=archive)
         return
 
     try:
@@ -328,18 +335,4 @@ def build_chunks(
             continue
 
         archive = load_archive_or_exit(raw_json_path)
-        chat_dir = settings.chat_output_dir(archive.chat.slug)
-
-        try:
-            chunks_dir, chunks_info = save_chunks(
-                chat_dir,
-                archive,
-                max_chars=180_000,
-                soft_min_chars=90_000,
-            )
-        except StorageError as exc:
-            print_storage_error(exc)
-            raise typer.Exit(code=1) from exc
-
-        console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
-        console.print(f"Files: {len(chunks_info)}")
+        rebuild_chunks_for_archive(settings=settings, archive=archive)

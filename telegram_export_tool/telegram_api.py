@@ -1,156 +1,129 @@
-import json
-from pathlib import Path
+from datetime import datetime, timezone
 
-from pydantic import BaseModel, ValidationError
+from telethon import TelegramClient
+from telethon.errors import RPCError, SessionPasswordNeededError
+from telethon.tl.custom.dialog import Dialog
 
-from telegram_export_tool.config import load_settings
+from telegram_export_tool.config import Settings
+from telegram_export_tool.formatting import build_chat_info, convert_message, to_utc_string
+from telegram_export_tool.models import RawArchive
 
 
-class DialogRegistryError(Exception):
+class TelegramError(Exception):
     pass
 
 
-class DialogRegistryReadError(DialogRegistryError):
+class TelegramAuthError(TelegramError):
     pass
 
 
-class DialogRegistryWriteError(DialogRegistryError):
+class TelegramEntityResolveError(TelegramError):
     pass
 
 
-class DialogRegistryValidationError(DialogRegistryError):
+class TelegramHistoryReadError(TelegramError):
     pass
 
 
-class DialogRegistryItem(BaseModel):
-    title: str
-    entity_id: str
-    entity_type: str
+async def make_client(settings: Settings) -> TelegramClient:
+    client = TelegramClient(
+        str(settings.session_name),
+        settings.api_id,
+        settings.api_hash,
+    )
 
-
-def get_scan_cache_path() -> Path:
-    settings = load_settings()
-    path = settings.scanned_dialogs_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def get_saved_dialogs_path() -> Path:
-    settings = load_settings()
-    path = settings.selected_dialogs_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _serialize_rows(rows: list[tuple[str, str, str]]) -> list[dict]:
-    items = [
-        DialogRegistryItem(
-            title=title,
-            entity_id=entity_id,
-            entity_type=entity_type,
-        )
-        for title, entity_id, entity_type in rows
-    ]
-    return [item.model_dump(mode="json") for item in items]
-
-
-def _deserialize_rows(data: str, source: Path) -> list[tuple[str, str, str]]:
     try:
-        raw_items = json.loads(data)
-    except json.JSONDecodeError as exc:
-        raise DialogRegistryReadError(f"Registry file is not valid JSON: {source}") from exc
+        await client.connect()
 
-    if not isinstance(raw_items, list):
-        raise DialogRegistryValidationError(f"Registry file must contain a JSON list: {source}")
+        if not await client.is_user_authorized():
+            if not settings.phone:
+                raise TelegramAuthError(
+                    "Telegram session is not authorized. Add TG_PHONE to .env or create the local session first."
+                )
 
+            try:
+                await client.start(phone=settings.phone)
+            except SessionPasswordNeededError as exc:
+                raise TelegramAuthError(
+                    "Two-factor authentication is enabled. Complete login in the local session first."
+                ) from exc
+
+        if not await client.is_user_authorized():
+            raise TelegramAuthError(
+                "Telegram session is not authorized. Create or restore the local user session first."
+            )
+
+        return client
+    except TelegramAuthError:
+        await client.disconnect()
+        raise
+    except Exception as exc:
+        await client.disconnect()
+        raise TelegramAuthError(f"Failed to initialize Telegram client: {exc}") from exc
+
+
+async def list_dialog_rows(client: TelegramClient, limit: int = 100) -> list[tuple[str, str, str]]:
     rows: list[tuple[str, str, str]] = []
 
-    for raw_item in raw_items:
-        try:
-            item = DialogRegistryItem.model_validate(raw_item)
-        except ValidationError as exc:
-            raise DialogRegistryValidationError(
-                f"Registry file contains invalid dialog item data: {source}"
-            ) from exc
-
-        rows.append((item.title, item.entity_id, item.entity_type))
+    try:
+        async for dialog in client.iter_dialogs(limit=limit):
+            rows.append(_dialog_to_row(dialog))
+    except RPCError as exc:
+        raise TelegramHistoryReadError(f"Failed to load dialogs from Telegram: {exc}") from exc
+    except Exception as exc:
+        raise TelegramHistoryReadError(f"Failed to read Telegram dialogs: {exc}") from exc
 
     return rows
 
 
-def save_scan_cache(rows: list[tuple[str, str, str]]) -> Path:
-    path = get_scan_cache_path()
+async def export_chat_archive(
+        client: TelegramClient,
+        chat_ref: str,
+        since: datetime | None = None,
+        until: datetime | None = None,
+) -> RawArchive:
+    try:
+        entity = await client.get_entity(chat_ref)
+    except RPCError as exc:
+        raise TelegramEntityResolveError(f"Failed to resolve chat '{chat_ref}': {exc}") from exc
+    except Exception as exc:
+        raise TelegramEntityResolveError(f"Failed to resolve chat '{chat_ref}': {exc}") from exc
+
+    messages = []
 
     try:
-        path.write_text(
-            json.dumps(_serialize_rows(rows), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        raise DialogRegistryWriteError(f"Failed to write scan cache: {path}") from exc
+        async for message in client.iter_messages(entity, reverse=True):
+            if message is None or getattr(message, "id", None) is None or getattr(message, "date", None) is None:
+                continue
 
-    return path
+            message_date = message.date
+            if message_date.tzinfo is None:
+                message_date = message_date.replace(tzinfo=timezone.utc)
 
+            if since is not None and message_date < since:
+                continue
+            if until is not None and message_date > until:
+                continue
 
-def load_scan_cache() -> list[tuple[str, str, str]]:
-    path = get_scan_cache_path()
+            messages.append(convert_message(message))
+    except RPCError as exc:
+        raise TelegramHistoryReadError(f"Failed to read chat history for '{chat_ref}': {exc}") from exc
+    except Exception as exc:
+        raise TelegramHistoryReadError(f"Failed to export chat history for '{chat_ref}': {exc}") from exc
 
-    if not path.exists():
-        return []
-
-    try:
-        data = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise DialogRegistryReadError(f"Failed to read scan cache: {path}") from exc
-
-    return _deserialize_rows(data, path)
-
-
-def save_saved_dialogs(rows: list[tuple[str, str, str]]) -> Path:
-    path = get_saved_dialogs_path()
-
-    try:
-        path.write_text(
-            json.dumps(_serialize_rows(rows), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        raise DialogRegistryWriteError(f"Failed to write saved dialogs registry: {path}") from exc
-
-    return path
+    return RawArchive(
+        chat=build_chat_info(entity),
+        exported_at_utc=to_utc_string(datetime.now(timezone.utc)),
+        total_messages=len(messages),
+        messages=messages,
+    )
 
 
-def load_saved_dialogs() -> list[tuple[str, str, str]]:
-    path = get_saved_dialogs_path()
-
-    if not path.exists():
-        return []
-
-    try:
-        data = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise DialogRegistryReadError(f"Failed to read saved dialogs registry: {path}") from exc
-
-    return _deserialize_rows(data, path)
-
-
-def save_saved_dialogs_from_indexes(
-        scan_rows: list[tuple[str, str, str]],
-        indexes: list[int],
-) -> list[tuple[str, str, str]]:
-    if not indexes:
-        raise ValueError("At least one dialog number must be provided.")
-
-    unique_indexes: list[int] = []
-    seen: set[int] = set()
-
-    for index in indexes:
-        if index < 1 or index > len(scan_rows):
-            raise ValueError(f"Dialog number out of range: {index}")
-        if index not in seen:
-            unique_indexes.append(index)
-            seen.add(index)
-
-    selected_rows = [scan_rows[index - 1] for index in unique_indexes]
-    save_saved_dialogs(selected_rows)
-    return selected_rows
+def _dialog_to_row(dialog: Dialog) -> tuple[str, str, str]:
+    entity = dialog.entity
+    title = dialog.name or getattr(entity, "title", None) or getattr(entity, "first_name", None) or str(
+        getattr(entity, "id", "unknown")
+    )
+    entity_id = str(getattr(entity, "id", ""))
+    entity_type = entity.__class__.__name__
+    return title, entity_id, entity_type
