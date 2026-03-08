@@ -1,5 +1,19 @@
+from datetime import datetime
+
 from telegram_export_tool.formatting import group_messages_by_month, render_archive_message
 from telegram_export_tool.models import ArchiveMessage, ChunkDraft, ChunkInfo
+
+
+DATE_UTC_FORMAT = "%Y-%m-%d %H:%M:%S UTC"
+MONTH_KEY_FORMAT = "%m.%Y"
+
+
+def parse_date_utc(value: str) -> datetime:
+    return datetime.strptime(value, DATE_UTC_FORMAT)
+
+
+def parse_month_key(value: str) -> datetime:
+    return datetime.strptime(value, MONTH_KEY_FORMAT)
 
 
 def split_month_into_parts(month: str, messages: list[ArchiveMessage], max_chars: int) -> list[ChunkDraft]:
@@ -78,6 +92,16 @@ def merge_chunk_pair(left: ChunkDraft, right: ChunkDraft) -> ChunkDraft:
     )
 
 
+def sort_messages_chronologically(messages: list[ArchiveMessage]) -> list[ArchiveMessage]:
+    return sorted(
+        messages,
+        key=lambda message: (
+            parse_date_utc(message.date_utc),
+            message.id,
+        ),
+    )
+
+
 def build_chunk_drafts(
     messages: list[ArchiveMessage],
     max_chars: int = 180000,
@@ -86,20 +110,30 @@ def build_chunk_drafts(
     if not messages:
         return []
 
-    month_groups = group_messages_by_month(messages)
-    month_order = list(month_groups.keys())
+    ordered_messages = sort_messages_chronologically(messages)
+    month_groups = group_messages_by_month(ordered_messages)
+    month_order = sorted(month_groups.keys(), key=parse_month_key)
+
     raw_drafts: list[ChunkDraft] = []
+    split_month_totals: dict[str, int] = {}
 
     for month in month_order:
-        raw_drafts.extend(split_month_into_parts(month=month, messages=month_groups[month], max_chars=max_chars))
+        month_parts = split_month_into_parts(
+            month=month,
+            messages=month_groups[month],
+            max_chars=max_chars,
+        )
+        raw_drafts.extend(month_parts)
+        if len(month_parts) > 1:
+            split_month_totals[month] = len(month_parts)
 
     merged: list[ChunkDraft] = []
     accumulator: ChunkDraft | None = None
 
     for draft in raw_drafts:
-        is_split_month_part = draft.start_month == draft.end_month and sum(1 for item in raw_drafts if item.start_month == draft.start_month and item.end_month == draft.end_month) > 1
+        is_real_split_month_part = split_month_totals.get(draft.start_month, 0) > 1
 
-        if is_split_month_part:
+        if is_real_split_month_part:
             if accumulator is not None:
                 merged.append(accumulator)
                 accumulator = None
@@ -121,32 +155,35 @@ def build_chunk_drafts(
     if accumulator is not None:
         merged.append(accumulator)
 
-    month_totals: dict[str, int] = {}
-    for draft in merged:
-        if draft.start_month == draft.end_month:
-            month_totals[draft.start_month] = month_totals.get(draft.start_month, 0) + 1
-
-    month_seen: dict[str, int] = {}
+    split_month_seen: dict[str, int] = {}
     finalized: list[ChunkDraft] = []
+
     for draft in merged:
         file_name: str
         part_index: int | None = None
         part_total: int | None = None
 
-        if draft.start_month == draft.end_month and month_totals.get(draft.start_month, 0) > 1:
-            part_total = month_totals[draft.start_month]
-            part_index = month_seen.get(draft.start_month, 0) + 1
-            month_seen[draft.start_month] = part_index
+        is_real_split_month_part = (
+            draft.start_month == draft.end_month
+            and split_month_totals.get(draft.start_month, 0) > 1
+        )
+
+        if is_real_split_month_part:
+            part_total = split_month_totals[draft.start_month]
+            part_index = split_month_seen.get(draft.start_month, 0) + 1
+            split_month_seen[draft.start_month] = part_index
             file_name = f"{draft.start_month}-{draft.end_month}_part{part_index}.txt"
         else:
             file_name = f"{draft.start_month}-{draft.end_month}.txt"
 
         finalized.append(
-            draft.model_copy(update={
-                "file_name": file_name,
-                "part_index": part_index,
-                "part_total": part_total,
-            })
+            draft.model_copy(
+                update={
+                    "file_name": file_name,
+                    "part_index": part_index,
+                    "part_total": part_total,
+                }
+            )
         )
 
     return finalized

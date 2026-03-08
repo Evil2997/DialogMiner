@@ -1,34 +1,29 @@
 from pathlib import Path
-import os
 
-from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseModel):
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="TG_",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
     api_id: int
     api_hash: str
     phone: str | None = None
     session_name: str = Field(default="telegram_export_session")
     output_dir: Path = Field(default=Path("output"))
+    state_dir: Path = Field(default=Path("state"))
+
+    def chat_output_dir(self, slug: str) -> Path:
+        return self.output_dir / slug
+
+    def selected_dialogs_path(self) -> Path:
+        return self.state_dir / "selected_dialogs.json"
 
 
-def load_settings() -> Settings:
-    load_dotenv()
-
-    api_id = os.getenv("TG_API_ID")
-    api_hash = os.getenv("TG_API_HASH")
-    phone = os.getenv("TG_PHONE")
-    session_name = os.getenv("TG_SESSION", "telegram_export_session")
-    output_dir = os.getenv("TG_OUTPUT_DIR", "output")
-
-    if not api_id or not api_hash:
-        raise RuntimeError("TG_API_ID and TG_API_HASH must be set in .env")
-
-    return Settings(
-        api_id=int(api_id),
-        api_hash=api_hash,
-        phone=phone,
-        session_name=session_name,
-        output_dir=Path(output_dir),
-    )
+settings = Settings()
