@@ -1,11 +1,16 @@
 [project]
-name = "cli-py-telethon"
+name = "Dialog-Miner"
 version = "1.0.0"
-description = "Add your description here"
-requires-python = ">=3.12"
+description = "Local CLI tool for exporting Telegram chat archives via user session"
+requires-python = ">=3.11"
 dependencies = [
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.1",
     "rich>=14.3.3",
     "telethon>=1.42.0",
     "typer>=0.24.1",
 ]
+
+[project.scripts]
+telegram-export = "telegram_export_tool.cli:app"
