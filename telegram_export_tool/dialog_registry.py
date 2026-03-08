@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from telegram_export_tool.config import load_settings
+from telegram_export_tool.config import settings
 
 
 class DialogRegistryError(Exception):
@@ -29,14 +29,12 @@ class DialogRegistryItem(BaseModel):
 
 
 def get_scan_cache_path() -> Path:
-    settings = load_settings()
     path = settings.scanned_dialogs_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_saved_dialogs_path() -> Path:
-    settings = load_settings()
     path = settings.selected_dialogs_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return path

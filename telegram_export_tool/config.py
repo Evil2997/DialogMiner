@@ -4,8 +4,10 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_export_tool.constants import DEFAULT_SESSION_NAME, OUTPUT_DIR_NAME, STATE_DIR_NAME
+from telegram_export_tool.constants import DEFAULT_SESSION_NAME
 from telegram_export_tool.paths import (
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_STATE_DIR,
     build_chat_output_dir,
     build_scanned_dialogs_path,
     build_selected_dialogs_path,
@@ -25,8 +27,8 @@ class Settings(BaseSettings):
 
     session_name: str = Field(default=DEFAULT_SESSION_NAME)
 
-    output_dir: Path = Field(default=Path(OUTPUT_DIR_NAME))
-    state_dir: Path = Field(default=Path(STATE_DIR_NAME))
+    output_dir: Path = Field(default=DEFAULT_OUTPUT_DIR)
+    state_dir: Path = Field(default=DEFAULT_STATE_DIR)
 
     def chat_output_dir(self, slug: str) -> Path:
         return build_chat_output_dir(self.output_dir, slug)
@@ -41,3 +43,6 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     return Settings()
+
+
+settings = load_settings()

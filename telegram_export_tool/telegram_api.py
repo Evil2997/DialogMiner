@@ -76,18 +76,41 @@ async def list_dialog_rows(client: TelegramClient, limit: int = 100) -> list[tup
     return rows
 
 
+async def resolve_chat_entity(client: TelegramClient, chat_ref: str):
+    normalized_ref = chat_ref.strip()
+
+    try:
+        return await client.get_entity(normalized_ref)
+    except Exception:
+        pass
+
+    numeric_ref = normalized_ref.removeprefix("+")
+    if numeric_ref.isdigit():
+        target_id = int(numeric_ref)
+
+        try:
+            async for dialog in client.iter_dialogs():
+                entity = dialog.entity
+                if getattr(entity, "id", None) == target_id:
+                    return entity
+        except RPCError as exc:
+            raise TelegramEntityResolveError(
+                f"Failed to scan dialogs while resolving chat '{chat_ref}': {exc}") from exc
+        except Exception as exc:
+            raise TelegramEntityResolveError(f"Failed to resolve chat '{chat_ref}' from dialogs: {exc}") from exc
+
+    raise TelegramEntityResolveError(
+        f"Failed to resolve chat '{chat_ref}'. Use a username/link or rescan dialogs and try again."
+    )
+
+
 async def export_chat_archive(
         client: TelegramClient,
         chat_ref: str,
         since: datetime | None = None,
         until: datetime | None = None,
 ) -> RawArchive:
-    try:
-        entity = await client.get_entity(chat_ref)
-    except RPCError as exc:
-        raise TelegramEntityResolveError(f"Failed to resolve chat '{chat_ref}': {exc}") from exc
-    except Exception as exc:
-        raise TelegramEntityResolveError(f"Failed to resolve chat '{chat_ref}': {exc}") from exc
+    entity = await resolve_chat_entity(client, chat_ref)
 
     messages = []
 

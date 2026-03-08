@@ -2,13 +2,13 @@ import json
 from pathlib import Path
 
 from pydantic import ValidationError
-from telegram_export_tool.constants import FALLBACK_CHUNK_FILE_NAME
-from telegram_export_tool.paths import build_chunks_dir, build_full_archive_path, build_raw_messages_path, \
-    build_summary_path
 
 from telegram_export_tool.chunking import build_chunk_drafts, build_chunk_summary, sort_messages_chronologically
+from telegram_export_tool.constants import EMPTY_MESSAGE_PLACEHOLDER, FALLBACK_CHUNK_FILE_NAME
 from telegram_export_tool.formatting import render_full_archive
 from telegram_export_tool.models import ChunkInfo, RawArchive, Summary
+from telegram_export_tool.paths import build_chunks_dir, build_full_archive_path, build_raw_messages_path, \
+    build_summary_path
 
 
 class StorageError(Exception):
@@ -125,11 +125,17 @@ def save_chunks(
     return chunks_dir, build_chunk_summary(drafts)
 
 
+def find_raw_archive_paths(output_dir: Path) -> list[Path]:
+    try:
+        return sorted(output_dir.glob("*/raw_messages.json"))
+    except OSError as exc:
+        raise StorageReadError(f"Failed to scan output directory for raw archives: {output_dir}") from exc
+
+
 def build_summary(archive: RawArchive, chunks_info: list[ChunkInfo]) -> Summary:
     ordered_messages = sort_messages_chronologically(archive.messages)
     authors = {message.author for message in archive.messages if message.author}
-    text_messages = sum(1 for message in archive.messages if
-                        message.text != FALLBACK_CHUNK_FILE_NAME.replace("chunk.txt", "[empty message]"))
+    text_messages = sum(1 for message in archive.messages if message.text != EMPTY_MESSAGE_PLACEHOLDER)
     service_messages = sum(1 for message in archive.messages if message.is_service)
     media_messages = sum(1 for message in archive.messages if message.has_media)
     forwarded_messages = sum(1 for message in archive.messages if message.forwarded_from is not None)

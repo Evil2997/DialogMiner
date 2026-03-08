@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
-from telegram_export_tool.config import Settings, load_settings
+from telegram_export_tool.config import settings
 from telegram_export_tool.constants import CHUNK_MAX_CHARS, CHUNK_SOFT_MIN_CHARS, DEFAULT_DIALOG_SCAN_LIMIT
 from telegram_export_tool.dialog_registry import (
     DialogRegistryError,
@@ -19,8 +19,11 @@ from telegram_export_tool.dialog_registry import (
 from telegram_export_tool.models import RawArchive
 from telegram_export_tool.storage import (
     StorageError,
+    StorageReadError,
+    StorageValidationError,
     build_summary,
     ensure_output_paths,
+    find_raw_archive_paths,
     load_raw_archive,
     save_chunks,
     save_full_archive,
@@ -54,9 +57,9 @@ def parse_bound_date(value: str | None, *, is_end: bool) -> datetime | None:
     return dt
 
 
-def get_settings_or_exit() -> Settings:
+def get_settings_or_exit():
     try:
-        return load_settings()
+        return settings
     except ValidationError as exc:
         console.print("[red]Invalid configuration.[/red]")
         for error in exc.errors():
@@ -81,8 +84,8 @@ def render_dialogs_table(title: str, rows: list[tuple[str, str, str]]) -> Table:
 
 
 def export_archive(archive: RawArchive) -> Path:
-    settings = get_settings_or_exit()
-    chat_dir = settings.chat_output_dir(archive.chat.slug)
+    active_settings = get_settings_or_exit()
+    chat_dir = active_settings.chat_output_dir(archive.chat.slug)
 
     ensure_output_paths(chat_dir)
 
@@ -128,21 +131,33 @@ def load_archive_or_exit(path: Path) -> RawArchive:
         raise typer.Exit(code=1) from exc
 
 
-def find_saved_archive_path(settings: Settings, entity_id: str) -> Path | None:
-    for raw_json_path in sorted(settings.output_dir.glob("*/raw_messages.json")):
+def find_saved_archive_path(active_settings, entity_id: str) -> Path | None:
+    raw_json_paths = find_raw_archive_paths(active_settings.output_dir)
+    broken_archives: list[str] = []
+
+    for raw_json_path in raw_json_paths:
         try:
             archive = load_raw_archive(raw_json_path)
-        except StorageError:
+        except StorageValidationError:
+            broken_archives.append(str(raw_json_path))
+            continue
+        except StorageReadError:
+            broken_archives.append(str(raw_json_path))
             continue
 
         if str(archive.chat.id) == entity_id:
             return raw_json_path
 
+    if broken_archives:
+        console.print("[yellow]Some raw archives were skipped because they could not be read:[/yellow]")
+        for broken_archive in broken_archives:
+            console.print(f"- {broken_archive}")
+
     return None
 
 
-def rebuild_chunks_for_archive(settings: Settings, archive: RawArchive) -> None:
-    chat_dir = settings.chat_output_dir(archive.chat.slug)
+def rebuild_chunks_for_archive(active_settings, archive: RawArchive) -> None:
+    chat_dir = active_settings.chat_output_dir(archive.chat.slug)
 
     try:
         chunks_dir, chunks_info = save_chunks(
@@ -165,8 +180,8 @@ def scan_dialogs(
     limit: int = typer.Option(DEFAULT_DIALOG_SCAN_LIMIT, help="How many dialogs to scan"),
 ) -> None:
     async def run() -> None:
-        settings = get_settings_or_exit()
-        client = await make_client(settings)
+        active_settings = get_settings_or_exit()
+        client = await make_client(active_settings)
 
         try:
             rows = await list_dialog_rows(client, limit=limit)
@@ -236,8 +251,8 @@ def export_chat(
     until: str | None = typer.Option(None),
 ) -> None:
     async def run() -> None:
-        settings = get_settings_or_exit()
-        client = await make_client(settings)
+        active_settings = get_settings_or_exit()
+        client = await make_client(active_settings)
 
         try:
             archive = await export_chat_archive(
@@ -274,18 +289,13 @@ def export_saved() -> None:
         raise typer.Exit(code=1)
 
     async def run() -> None:
-        settings = get_settings_or_exit()
-        client = await make_client(settings)
+        active_settings = get_settings_or_exit()
+        client = await make_client(active_settings)
 
         try:
-            for title, entity_id, entity_type in rows:
-                console.print(f"[cyan]Exporting[/cyan] {title} ({entity_type})")
-
-                archive = await export_chat_archive(
-                    client=client,
-                    chat_ref=entity_id,
-                )
-
+            for title, entity_id, _entity_type in rows:
+                console.print(f"[cyan]Exporting[/cyan] {title} ({entity_id})")
+                archive = await export_chat_archive(client=client, chat_ref=entity_id)
                 export_archive(archive)
         finally:
             await client.disconnect()
@@ -294,6 +304,9 @@ def export_saved() -> None:
         asyncio.run(run())
     except StorageError as exc:
         print_storage_error(exc)
+        raise typer.Exit(code=1) from exc
+    except DialogRegistryError as exc:
+        print_registry_error(exc)
         raise typer.Exit(code=1) from exc
     except (TelegramAuthError, TelegramEntityResolveError, TelegramHistoryReadError) as exc:
         print_telegram_error(exc)
@@ -304,15 +317,11 @@ def export_saved() -> None:
 def build_chunks(
     raw_json: Path | None = typer.Option(None, "--raw-json"),
 ) -> None:
-    settings = get_settings_or_exit()
+    active_settings = get_settings_or_exit()
 
     if raw_json is not None:
-        if not raw_json.exists():
-            console.print(f"[red]File not found: {raw_json}[/red]")
-            raise typer.Exit(code=1)
-
         archive = load_archive_or_exit(raw_json)
-        rebuild_chunks_for_archive(settings=settings, archive=archive)
+        rebuild_chunks_for_archive(active_settings, archive)
         return
 
     try:
@@ -322,15 +331,14 @@ def build_chunks(
         raise typer.Exit(code=1) from exc
 
     if not rows:
-        console.print("[red]No saved dialogs[/red]")
+        console.print("[red]No saved dialogs. Run save-dialogs first or pass --raw-json.[/red]")
         raise typer.Exit(code=1)
 
-    for title, entity_id, _ in rows:
-        raw_json_path = find_saved_archive_path(settings, entity_id=entity_id)
-
-        if raw_json_path is None:
-            console.print(f"[yellow]Skipping {title}: raw_messages.json not found[/yellow]")
+    for title, entity_id, _entity_type in rows:
+        archive_path = find_saved_archive_path(active_settings, entity_id)
+        if archive_path is None:
+            console.print(f"[yellow]Skipped[/yellow] {title}: raw archive not found for saved dialog ID {entity_id}")
             continue
 
-        archive = load_archive_or_exit(raw_json_path)
-        rebuild_chunks_for_archive(settings=settings, archive=archive)
+        archive = load_archive_or_exit(archive_path)
+        rebuild_chunks_for_archive(active_settings, archive)

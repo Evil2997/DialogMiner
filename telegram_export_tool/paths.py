@@ -3,11 +3,17 @@ from pathlib import Path
 from telegram_export_tool.constants import (
     CHUNKS_DIR_NAME,
     FULL_ARCHIVE_FILE_NAME,
+    OUTPUT_DIR_NAME,
     RAW_MESSAGES_FILE_NAME,
     SCANNED_DIALOGS_FILE_NAME,
     SELECTED_DIALOGS_FILE_NAME,
+    STATE_DIR_NAME,
     SUMMARY_FILE_NAME,
 )
+
+MAIN_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT_DIR = MAIN_DIR / OUTPUT_DIR_NAME
+DEFAULT_STATE_DIR = MAIN_DIR / STATE_DIR_NAME
 
 
 def build_chat_output_dir(output_dir: Path, slug: str) -> Path:
