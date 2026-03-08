@@ -13,6 +13,10 @@ class TelegramLayerError(Exception):
     pass
 
 
+class TelegramAuthError(TelegramLayerError):
+    pass
+
+
 class TelegramEntityResolveError(TelegramLayerError):
     pass
 
@@ -24,7 +28,7 @@ class TelegramHistoryReadError(TelegramLayerError):
 def to_utc_string(value: datetime) -> str:
     dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     dt = dt.astimezone(timezone.utc).replace(microsecond=0)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def _slugify(value: str) -> str:
@@ -189,13 +193,31 @@ async def make_client(settings: Settings) -> TelegramClient:
     await client.connect()
 
     if not await client.is_user_authorized():
-        await client.start(phone=settings.phone)
+        if not settings.phone:
+            await client.disconnect()
+            raise TelegramAuthError(
+                "Telegram session is not authorized. Set TG_PHONE in your environment or authorize the session first."
+            )
+
+        try:
+            await client.start(phone=settings.phone)
+        except (RPCError, ValueError) as exc:
+            await client.disconnect()
+            raise TelegramAuthError("Failed to authorize Telegram client session.") from exc
 
     return client
 
 
 async def list_dialog_rows(client: TelegramClient, limit: int) -> list[tuple[str, str, str]]:
-    dialogs = await client.get_dialogs(limit=limit)
+    try:
+        dialogs = await client.get_dialogs(limit=limit)
+    except FloodWaitError as exc:
+        raise TelegramHistoryReadError(
+            f"Telegram rate limit was reached while loading dialogs. Retry after {exc.seconds} seconds."
+        ) from exc
+    except (RPCError, ValueError) as exc:
+        raise TelegramHistoryReadError("Failed to load Telegram dialogs.") from exc
+
     rows: list[tuple[str, str, str]] = []
     for dialog in dialogs:
         entity = dialog.entity

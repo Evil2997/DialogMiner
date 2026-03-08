@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field
@@ -30,4 +31,6 @@ class Settings(BaseSettings):
         return self.state_dir / "scanned_dialogs.json"
 
 
-settings = Settings()
+@lru_cache(maxsize=1)
+def load_settings() -> Settings:
+    return Settings()

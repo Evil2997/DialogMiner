@@ -9,17 +9,6 @@ from telegram_export_tool.formatting import render_full_archive
 from telegram_export_tool.models import RawArchive, Summary
 
 
-class ScannedDialogState(BaseModel):
-    title: str
-    id: int
-    type: str
-    slug: str
-    source_index: int | None = None
-    display_index: int | None = None
-    username: str | None = None
-    scanned_at: str | None = None
-
-
 class SelectedDialogState(BaseModel):
     title: str
     id: int
@@ -31,11 +20,7 @@ class SelectedDialogState(BaseModel):
     selected_at: str | None = None
 
 
-def _utc_now_string() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-
-def ensure_output_paths(chat_dir: Path) -> tuple[Path, Path]:
+def ensure_output_chat_paths(chat_dir: Path) -> tuple[Path, Path]:
     chunks_dir = chat_dir / "chunks"
 
     chat_dir.mkdir(parents=True, exist_ok=True)
@@ -44,20 +29,17 @@ def ensure_output_paths(chat_dir: Path) -> tuple[Path, Path]:
     return chat_dir, chunks_dir
 
 
-def ensure_state_paths(state_dir: Path) -> tuple[Path, Path]:
-    state_dir.mkdir(parents=True, exist_ok=True)
-    scanned_path = state_dir / "scanned_dialogs.json"
-    selected_path = state_dir / "selected_dialogs.json"
-    return scanned_path, selected_path
+def ensure_output_paths(chat_dir: Path) -> tuple[Path, Path]:
+    return ensure_output_chat_paths(chat_dir)
 
 
 def ensure_state_path(state_dir: Path) -> Path:
-    _, selected_path = ensure_state_paths(state_dir)
-    return selected_path
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir / "selected_dialogs.json"
 
 
 def save_raw_archive(chat_dir: Path, archive: RawArchive) -> Path:
-    chat_dir, _ = ensure_output_paths(chat_dir)
+    chat_dir, _ = ensure_output_chat_paths(chat_dir)
 
     path = chat_dir / "raw_messages.json"
     path.write_text(
@@ -72,7 +54,7 @@ def load_raw_archive(path: Path) -> RawArchive:
 
 
 def save_full_archive(chat_dir: Path, archive: RawArchive) -> Path:
-    chat_dir, _ = ensure_output_paths(chat_dir)
+    chat_dir, _ = ensure_output_chat_paths(chat_dir)
 
     path = chat_dir / "full_archive.txt"
     path.write_text(render_full_archive(archive.messages), encoding="utf-8")
@@ -89,7 +71,7 @@ def plan_chunks(archive: RawArchive, max_chars: int, soft_min_chars: int) -> lis
 
 
 def save_chunks(chat_dir: Path, archive: RawArchive, max_chars: int, soft_min_chars: int) -> tuple[Path, list]:
-    _, chunks_dir = ensure_output_paths(chat_dir)
+    _, chunks_dir = ensure_output_chat_paths(chat_dir)
 
     for existing in chunks_dir.glob("*.txt"):
         existing.unlink()
@@ -110,7 +92,7 @@ def build_summary(archive: RawArchive, chunks_info: list) -> Summary:
     authors = {message.author for message in archive.messages}
     text_messages = sum(
         1 for message in archive.messages
-        if message.text != "[empty message]"
+        if message.text and not message.text.startswith("[empty message]")
     )
     service_messages = sum(1 for message in archive.messages if message.is_service)
     media_messages = sum(1 for message in archive.messages if message.has_media)
@@ -133,7 +115,7 @@ def build_summary(archive: RawArchive, chunks_info: list) -> Summary:
 
 
 def save_summary(chat_dir: Path, summary: Summary) -> Path:
-    chat_dir, _ = ensure_output_paths(chat_dir)
+    chat_dir, _ = ensure_output_chat_paths(chat_dir)
 
     path = chat_dir / "summary.json"
     path.write_text(
@@ -143,53 +125,27 @@ def save_summary(chat_dir: Path, summary: Summary) -> Path:
     return path
 
 
-def save_scanned_dialogs(state_dir: Path, dialogs: list[ScannedDialogState]) -> Path:
-    scanned_path, _ = ensure_state_paths(state_dir)
-
-    payload = {
-        "saved_at": _utc_now_string(),
-        "dialogs": [dialog.model_dump(mode="json") for dialog in dialogs],
-    }
-
-    scanned_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return scanned_path
-
-
-def load_scanned_dialogs(state_dir: Path) -> list[ScannedDialogState]:
-    scanned_path, _ = ensure_state_paths(state_dir)
-
-    if not scanned_path.exists():
-        return []
-
-    data = json.loads(scanned_path.read_text(encoding="utf-8"))
-    dialogs = data.get("dialogs", [])
-    return [ScannedDialogState.model_validate(item) for item in dialogs]
-
-
 def save_selected_dialogs(state_dir: Path, dialogs: list[SelectedDialogState]) -> Path:
-    _, selected_path = ensure_state_paths(state_dir)
+    path = ensure_state_path(state_dir)
 
     payload = {
-        "saved_at": _utc_now_string(),
+        "saved_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "dialogs": [dialog.model_dump(mode="json") for dialog in dialogs],
     }
 
-    selected_path.write_text(
+    path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    return selected_path
+    return path
 
 
 def load_selected_dialogs(state_dir: Path) -> list[SelectedDialogState]:
-    _, selected_path = ensure_state_paths(state_dir)
+    path = ensure_state_path(state_dir)
 
-    if not selected_path.exists():
+    if not path.exists():
         return []
 
-    data = json.loads(selected_path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
     dialogs = data.get("dialogs", [])
     return [SelectedDialogState.model_validate(item) for item in dialogs]
