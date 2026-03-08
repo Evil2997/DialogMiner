@@ -84,6 +84,7 @@ def scan_dialogs(
 ) -> None:
     async def run() -> None:
         client = await make_client(settings)
+
         try:
             rows = await list_dialog_rows(client, limit=limit)
         finally:
@@ -182,7 +183,13 @@ def build_chunks(
     if raw_json is not None:
         archive = load_raw_archive(raw_json)
         chat_dir = raw_json.parent
-        chunks_dir, chunks_info = save_chunks(chat_dir, archive, 180000, 90000)
+
+        chunks_dir, chunks_info = save_chunks(
+            chat_dir,
+            archive,
+            max_chars=180000,
+            soft_min_chars=90000,
+        )
 
         console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
         console.print(f"Files: {len(chunks_info)}")
@@ -194,9 +201,10 @@ def build_chunks(
         console.print("[red]No saved dialogs[/red]")
         raise typer.Exit(code=1)
 
-    for title, entity_id, _ in rows:
+    for title, _, _ in rows:
         slug = title.lower().replace(" ", "_")
         chat_dir = settings.chat_output_dir(slug)
+
         raw_json_path = chat_dir / "raw_messages.json"
 
         if not raw_json_path.exists():
@@ -204,7 +212,13 @@ def build_chunks(
             continue
 
         archive = load_raw_archive(raw_json_path)
-        chunks_dir, chunks_info = save_chunks(chat_dir, archive, 180000, 90000)
+
+        chunks_dir, chunks_info = save_chunks(
+            chat_dir,
+            archive,
+            max_chars=180_000,
+            soft_min_chars=90_000,
+        )
 
         console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
         console.print(f"Files: {len(chunks_info)}")
