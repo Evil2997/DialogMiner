@@ -20,7 +20,7 @@ class SelectedDialogState(BaseModel):
     selected_at: str | None = None
 
 
-def ensure_output_chat_paths(chat_dir: Path) -> tuple[Path, Path]:
+def ensure_output_paths(chat_dir: Path) -> tuple[Path, Path]:
     chunks_dir = chat_dir / "chunks"
 
     chat_dir.mkdir(parents=True, exist_ok=True)
@@ -35,7 +35,7 @@ def ensure_state_path(state_dir: Path) -> Path:
 
 
 def save_raw_archive(chat_dir: Path, archive: RawArchive) -> Path:
-    chat_dir, _ = ensure_output_chat_paths(chat_dir)
+    chat_dir, _ = ensure_output_paths(chat_dir)
 
     path = chat_dir / "raw_messages.json"
     path.write_text(
@@ -50,7 +50,7 @@ def load_raw_archive(path: Path) -> RawArchive:
 
 
 def save_full_archive(chat_dir: Path, archive: RawArchive) -> Path:
-    chat_dir, _ = ensure_output_chat_paths(chat_dir)
+    chat_dir, _ = ensure_output_paths(chat_dir)
 
     path = chat_dir / "full_archive.txt"
     path.write_text(render_full_archive(archive.messages), encoding="utf-8")
@@ -67,7 +67,7 @@ def plan_chunks(archive: RawArchive, max_chars: int, soft_min_chars: int) -> lis
 
 
 def save_chunks(chat_dir: Path, archive: RawArchive, max_chars: int, soft_min_chars: int) -> tuple[Path, list]:
-    _, chunks_dir = ensure_output_chat_paths(chat_dir)
+    _, chunks_dir = ensure_output_paths(chat_dir)
 
     for existing in chunks_dir.glob("*.txt"):
         existing.unlink()
@@ -111,7 +111,7 @@ def build_summary(archive: RawArchive, chunks_info: list) -> Summary:
 
 
 def save_summary(chat_dir: Path, summary: Summary) -> Path:
-    chat_dir, _ = ensure_output_chat_paths(chat_dir)
+    chat_dir, _ = ensure_output_paths(chat_dir)
 
     path = chat_dir / "summary.json"
     path.write_text(
