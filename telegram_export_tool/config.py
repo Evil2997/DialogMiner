@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     def selected_dialogs_path(self) -> Path:
         return self.state_dir / "selected_dialogs.json"
 
-    def scan_cache_path(self) -> Path:
+    def scanned_dialogs_path(self) -> Path:
         return self.state_dir / "scanned_dialogs.json"
 
 

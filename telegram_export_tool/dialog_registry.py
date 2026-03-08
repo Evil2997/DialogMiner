@@ -13,7 +13,7 @@ class DialogRegistryItem(BaseModel):
 
 
 def get_scan_cache_path() -> Path:
-    path = settings.scan_cache_path()
+    path = settings.scanned_dialogs_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -80,8 +80,8 @@ def load_saved_dialogs() -> list[tuple[str, str, str]]:
 
 
 def save_saved_dialogs_from_indexes(
-    scan_rows: list[tuple[str, str, str]],
-    indexes: list[int],
+        scan_rows: list[tuple[str, str, str]],
+        indexes: list[int],
 ) -> list[tuple[str, str, str]]:
     if not indexes:
         raise ValueError("At least one dialog number must be provided.")
