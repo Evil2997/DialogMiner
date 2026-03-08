@@ -3,7 +3,6 @@ from datetime import datetime
 from telegram_export_tool.formatting import group_messages_by_month, render_archive_message
 from telegram_export_tool.models import ArchiveMessage, ChunkDraft, ChunkInfo
 
-
 DATE_UTC_FORMAT = "%Y-%m-%d %H:%M:%S UTC"
 MONTH_KEY_FORMAT = "%m.%Y"
 
@@ -103,9 +102,9 @@ def sort_messages_chronologically(messages: list[ArchiveMessage]) -> list[Archiv
 
 
 def build_chunk_drafts(
-    messages: list[ArchiveMessage],
-    max_chars: int = 180000,
-    soft_min_chars: int = 90000,
+        messages: list[ArchiveMessage],
+        max_chars: int = 180_000,
+        soft_min_chars: int = 90_000,
 ) -> list[ChunkDraft]:
     if not messages:
         return []
@@ -164,8 +163,8 @@ def build_chunk_drafts(
         part_total: int | None = None
 
         is_real_split_month_part = (
-            draft.start_month == draft.end_month
-            and split_month_totals.get(draft.start_month, 0) > 1
+                draft.start_month == draft.end_month
+                and split_month_totals.get(draft.start_month, 0) > 1
         )
 
         if is_real_split_month_part:
