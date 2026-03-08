@@ -6,7 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from telegram_export_tool.config import load_settings
+from telegram_export_tool.config import settings
 from telegram_export_tool.dialog_registry import (
     get_saved_dialogs_path,
     get_scan_cache_path,
@@ -58,10 +58,10 @@ def render_dialogs_table(title: str, rows: list[tuple[str, str, str]]) -> Table:
 
 
 def export_archive_to_storage(
-    archive,
-    output_root: Path,
-    max_chunk_chars: int,
-    soft_min_chunk_chars: int,
+        archive,
+        output_root: Path,
+        max_chunk_chars: int,
+        soft_min_chunk_chars: int,
 ) -> Path:
     chat_dir = resolve_chat_dir(output_root, archive.chat.slug)
     ensure_output_paths(chat_dir)
@@ -74,10 +74,9 @@ def export_archive_to_storage(
 
 @app.command("scan-dialogs")
 def scan_dialogs(
-    limit: int = typer.Option(100, help="How many dialogs to scan"),
+        limit: int = typer.Option(100, help="How many dialogs to scan"),
 ) -> None:
     async def run() -> None:
-        settings = load_settings()
         client = await make_client(settings)
         try:
             rows = await list_dialog_rows(client, limit=limit)
@@ -93,7 +92,7 @@ def scan_dialogs(
 
 @app.command("save-dialogs")
 def save_dialogs(
-    indexes: list[int] = typer.Argument(..., help="Dialog numbers from the latest scan"),
+        indexes: list[int] = typer.Argument(..., help="Dialog numbers from the latest scan"),
 ) -> None:
     scan_rows = load_scan_cache()
     if not scan_rows:
@@ -124,14 +123,13 @@ def list_saved() -> None:
 
 @app.command("export-chat")
 def export_chat(
-    chat: str = typer.Option(..., "--chat", help="Chat ID, username, or other valid Telegram chat reference"),
-    since: str | None = typer.Option(None, "--since", help="Start date YYYY-MM-DD"),
-    until: str | None = typer.Option(None, "--until", help="End date YYYY-MM-DD"),
-    max_chunk_chars: int = typer.Option(180000, "--max-chunk-chars", min=1000),
-    soft_min_chunk_chars: int = typer.Option(90000, "--soft-min-chunk-chars", min=0),
+        chat: str = typer.Option(..., "--chat", help="Chat ID, username, or other valid Telegram chat reference"),
+        since: str | None = typer.Option(None, "--since", help="Start date YYYY-MM-DD"),
+        until: str | None = typer.Option(None, "--until", help="End date YYYY-MM-DD"),
+        max_chunk_chars: int = typer.Option(180000, "--max-chunk-chars", min=1000),
+        soft_min_chunk_chars: int = typer.Option(90000, "--soft-min-chunk-chars", min=0),
 ) -> None:
     async def run() -> None:
-        settings = load_settings()
         client = await make_client(settings)
         try:
             archive = await export_chat_archive(
@@ -158,13 +156,12 @@ def export_chat(
 
 @app.command("export-saved")
 def export_saved(
-    since: str | None = typer.Option(None, "--since", help="Start date YYYY-MM-DD"),
-    until: str | None = typer.Option(None, "--until", help="End date YYYY-MM-DD"),
-    max_chunk_chars: int = typer.Option(180000, "--max-chunk-chars", min=1000),
-    soft_min_chunk_chars: int = typer.Option(90000, "--soft-min-chunk-chars", min=0),
+        since: str | None = typer.Option(None, "--since", help="Start date YYYY-MM-DD"),
+        until: str | None = typer.Option(None, "--until", help="End date YYYY-MM-DD"),
+        max_chunk_chars: int = typer.Option(180000, "--max-chunk-chars", min=1000),
+        soft_min_chunk_chars: int = typer.Option(90000, "--soft-min-chunk-chars", min=0),
 ) -> None:
     async def run() -> None:
-        settings = load_settings()
         saved_rows = load_saved_dialogs()
         if not saved_rows:
             console.print("[red]No saved dialogs.[/red] Run save-dialogs first.")
@@ -199,16 +196,12 @@ def export_saved(
 
 @app.command("build-chunks")
 def build_chunks_command(
-    raw_json: Path = typer.Option(..., "--raw-json", exists=True, file_okay=True, dir_okay=False),
-    max_chunk_chars: int = typer.Option(180000, "--max-chunk-chars", min=1000),
-    soft_min_chunk_chars: int = typer.Option(90000, "--soft-min-chunk-chars", min=0),
+        raw_json: Path = typer.Option(..., "--raw-json", exists=True, file_okay=True, dir_okay=False),
+        max_chunk_chars: int = typer.Option(180000, "--max-chunk-chars", min=1000),
+        soft_min_chunk_chars: int = typer.Option(90000, "--soft-min-chunk-chars", min=0),
 ) -> None:
     archive = load_raw_archive(raw_json)
     chat_dir = raw_json.parent
     chunks_dir, chunks_info = save_chunks(chat_dir, archive, max_chunk_chars, soft_min_chunk_chars)
     console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
     console.print(f"Files: {len(chunks_info)}")
-
-
-if __name__ == "__main__":
-    app()

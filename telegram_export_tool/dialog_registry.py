@@ -3,6 +3,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from telegram_export_tool.config import settings
+
 
 class DialogRegistryItem(BaseModel):
     title: str
@@ -10,16 +12,16 @@ class DialogRegistryItem(BaseModel):
     entity_type: str
 
 
-def get_project_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
 def get_scan_cache_path() -> Path:
-    return get_project_root() / "scanned_dialogs.json"
+    path = settings.scan_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def get_saved_dialogs_path() -> Path:
-    return get_project_root() / "selected_dialogs.json"
+    path = settings.selected_dialogs_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _serialize_rows(rows: list[tuple[str, str, str]]) -> list[dict]:

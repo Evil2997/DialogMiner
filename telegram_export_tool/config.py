@@ -9,13 +9,14 @@ class Settings(BaseSettings):
         env_file=".env",
         env_prefix="TG_",
         case_sensitive=False,
-        extra="ignore",
     )
 
     api_id: int
     api_hash: str
     phone: str | None = None
+
     session_name: str = Field(default="telegram_export_session")
+
     output_dir: Path = Field(default=Path("output"))
     state_dir: Path = Field(default=Path("state"))
 
@@ -24,6 +25,9 @@ class Settings(BaseSettings):
 
     def selected_dialogs_path(self) -> Path:
         return self.state_dir / "selected_dialogs.json"
+
+    def scan_cache_path(self) -> Path:
+        return self.state_dir / "scanned_dialogs.json"
 
 
 settings = Settings()
