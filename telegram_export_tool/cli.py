@@ -9,6 +9,7 @@ from rich.table import Table
 
 from telegram_export_tool.config import Settings, load_settings
 from telegram_export_tool.dialog_registry import (
+    DialogRegistryError,
     load_saved_dialogs,
     load_scan_cache,
     save_saved_dialogs_from_indexes,
@@ -16,6 +17,7 @@ from telegram_export_tool.dialog_registry import (
 )
 from telegram_export_tool.models import RawArchive
 from telegram_export_tool.storage import (
+    StorageError,
     build_summary,
     ensure_output_paths,
     load_raw_archive,
@@ -105,30 +107,37 @@ def export_archive(archive: RawArchive) -> Path:
     return chat_dir
 
 
-def find_chat_dir_for_archive(settings: Settings, archive: RawArchive) -> Path:
-    return settings.chat_output_dir(archive.chat.slug)
+def print_telegram_error(exc: Exception) -> None:
+    console.print(f"[red]{exc}[/red]")
 
 
-def find_saved_archive_path(settings: Settings, entity_id: str, fallback_title: str) -> Path | None:
+def print_registry_error(exc: Exception) -> None:
+    console.print(f"[red]{exc}[/red]")
+
+
+def print_storage_error(exc: Exception) -> None:
+    console.print(f"[red]{exc}[/red]")
+
+
+def load_archive_or_exit(path: Path) -> RawArchive:
+    try:
+        return load_raw_archive(path)
+    except StorageError as exc:
+        print_storage_error(exc)
+        raise typer.Exit(code=1) from exc
+
+
+def find_saved_archive_path(settings: Settings, entity_id: str) -> Path | None:
     for raw_json_path in sorted(settings.output_dir.glob("*/raw_messages.json")):
         try:
             archive = load_raw_archive(raw_json_path)
-        except Exception:
+        except StorageError:
             continue
 
         if str(archive.chat.id) == entity_id:
             return raw_json_path
 
-    fallback_chat_dir = settings.chat_output_dir(fallback_title)
-    fallback_raw_json = fallback_chat_dir / "raw_messages.json"
-    if fallback_raw_json.exists():
-        return fallback_raw_json
-
     return None
-
-
-def print_telegram_error(exc: Exception) -> None:
-    console.print(f"[red]{exc}[/red]")
 
 
 @app.command("scan-dialogs")
@@ -151,6 +160,9 @@ def scan_dialogs(
 
     try:
         asyncio.run(run())
+    except DialogRegistryError as exc:
+        print_registry_error(exc)
+        raise typer.Exit(code=1) from exc
     except (TelegramAuthError, TelegramHistoryReadError) as exc:
         print_telegram_error(exc)
         raise typer.Exit(code=1) from exc
@@ -160,7 +172,11 @@ def scan_dialogs(
 def save_dialogs(
     indexes: list[int] = typer.Argument(...),
 ) -> None:
-    scan_rows = load_scan_cache()
+    try:
+        scan_rows = load_scan_cache()
+    except DialogRegistryError as exc:
+        print_registry_error(exc)
+        raise typer.Exit(code=1) from exc
 
     if not scan_rows:
         console.print("[red]No scan cache found. Run scan-dialogs first.[/red]")
@@ -168,6 +184,9 @@ def save_dialogs(
 
     try:
         saved_rows = save_saved_dialogs_from_indexes(scan_rows, indexes)
+    except DialogRegistryError as exc:
+        print_registry_error(exc)
+        raise typer.Exit(code=1) from exc
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
@@ -177,7 +196,11 @@ def save_dialogs(
 
 @app.command("list-saved")
 def list_saved() -> None:
-    rows = load_saved_dialogs()
+    try:
+        rows = load_saved_dialogs()
+    except DialogRegistryError as exc:
+        print_registry_error(exc)
+        raise typer.Exit(code=1) from exc
 
     if not rows:
         console.print("[yellow]No saved dialogs[/yellow]")
@@ -210,6 +233,9 @@ def export_chat(
 
     try:
         asyncio.run(run())
+    except StorageError as exc:
+        print_storage_error(exc)
+        raise typer.Exit(code=1) from exc
     except (TelegramAuthError, TelegramEntityResolveError, TelegramHistoryReadError) as exc:
         print_telegram_error(exc)
         raise typer.Exit(code=1) from exc
@@ -217,13 +243,17 @@ def export_chat(
 
 @app.command("export-saved")
 def export_saved() -> None:
-    async def run() -> None:
+    try:
         rows = load_saved_dialogs()
+    except DialogRegistryError as exc:
+        print_registry_error(exc)
+        raise typer.Exit(code=1) from exc
 
-        if not rows:
-            console.print("[red]No saved dialogs. Run save-dialogs first.[/red]")
-            raise typer.Exit(code=1)
+    if not rows:
+        console.print("[red]No saved dialogs. Run save-dialogs first.[/red]")
+        raise typer.Exit(code=1)
 
+    async def run() -> None:
         settings = get_settings_or_exit()
         client = await make_client(settings)
 
@@ -243,6 +273,9 @@ def export_saved() -> None:
 
     try:
         asyncio.run(run())
+    except StorageError as exc:
+        print_storage_error(exc)
+        raise typer.Exit(code=1) from exc
     except (TelegramAuthError, TelegramEntityResolveError, TelegramHistoryReadError) as exc:
         print_telegram_error(exc)
         raise typer.Exit(code=1) from exc
@@ -259,42 +292,54 @@ def build_chunks(
             console.print(f"[red]File not found: {raw_json}[/red]")
             raise typer.Exit(code=1)
 
-        archive = load_raw_archive(raw_json)
-        chat_dir = raw_json.parent
+        archive = load_archive_or_exit(raw_json)
+        chat_dir = settings.chat_output_dir(archive.chat.slug)
 
-        chunks_dir, chunks_info = save_chunks(
-            chat_dir,
-            archive,
-            max_chars=180_000,
-            soft_min_chars=90_000,
-        )
+        try:
+            chunks_dir, chunks_info = save_chunks(
+                chat_dir,
+                archive,
+                max_chars=180_000,
+                soft_min_chars=90_000,
+            )
+        except StorageError as exc:
+            print_storage_error(exc)
+            raise typer.Exit(code=1) from exc
 
         console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
         console.print(f"Files: {len(chunks_info)}")
         return
 
-    rows = load_saved_dialogs()
+    try:
+        rows = load_saved_dialogs()
+    except DialogRegistryError as exc:
+        print_registry_error(exc)
+        raise typer.Exit(code=1) from exc
 
     if not rows:
         console.print("[red]No saved dialogs[/red]")
         raise typer.Exit(code=1)
 
     for title, entity_id, _ in rows:
-        raw_json_path = find_saved_archive_path(settings, entity_id=entity_id, fallback_title=title)
+        raw_json_path = find_saved_archive_path(settings, entity_id=entity_id)
 
         if raw_json_path is None:
             console.print(f"[yellow]Skipping {title}: raw_messages.json not found[/yellow]")
             continue
 
-        archive = load_raw_archive(raw_json_path)
-        chat_dir = find_chat_dir_for_archive(settings, archive)
+        archive = load_archive_or_exit(raw_json_path)
+        chat_dir = settings.chat_output_dir(archive.chat.slug)
 
-        chunks_dir, chunks_info = save_chunks(
-            chat_dir,
-            archive,
-            max_chars=180_000,
-            soft_min_chars=90_000,
-        )
+        try:
+            chunks_dir, chunks_info = save_chunks(
+                chat_dir,
+                archive,
+                max_chars=180_000,
+                soft_min_chars=90_000,
+            )
+        except StorageError as exc:
+            print_storage_error(exc)
+            raise typer.Exit(code=1) from exc
 
         console.print(f"[green]Chunks rebuilt[/green]: {chunks_dir}")
         console.print(f"Files: {len(chunks_info)}")

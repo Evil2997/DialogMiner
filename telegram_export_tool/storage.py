@@ -1,12 +1,27 @@
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from telegram_export_tool.chunking import build_chunk_drafts, build_chunk_summary
 from telegram_export_tool.formatting import render_full_archive
 from telegram_export_tool.models import RawArchive, Summary
+
+
+class StorageError(Exception):
+    pass
+
+
+class StorageReadError(StorageError):
+    pass
+
+
+class StorageWriteError(StorageError):
+    pass
+
+
+class StorageValidationError(StorageError):
+    pass
 
 
 class SelectedDialogState(BaseModel):
@@ -23,8 +38,11 @@ class SelectedDialogState(BaseModel):
 def ensure_output_chat_paths(chat_dir: Path) -> tuple[Path, Path]:
     chunks_dir = chat_dir / "chunks"
 
-    chat_dir.mkdir(parents=True, exist_ok=True)
-    chunks_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        chat_dir.mkdir(parents=True, exist_ok=True)
+        chunks_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise StorageWriteError(f"Failed to create output directories: {chat_dir}") from exc
 
     return chat_dir, chunks_dir
 
@@ -33,31 +51,48 @@ def ensure_output_paths(chat_dir: Path) -> tuple[Path, Path]:
     return ensure_output_chat_paths(chat_dir)
 
 
-def ensure_state_path(state_dir: Path) -> Path:
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir / "selected_dialogs.json"
-
-
 def save_raw_archive(chat_dir: Path, archive: RawArchive) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
 
     path = chat_dir / "raw_messages.json"
-    path.write_text(
-        json.dumps(archive.model_dump(mode="json"), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+
+    try:
+        path.write_text(
+            json.dumps(archive.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise StorageWriteError(f"Failed to write raw archive: {path}") from exc
+
     return path
 
 
 def load_raw_archive(path: Path) -> RawArchive:
-    return RawArchive.model_validate_json(path.read_text(encoding="utf-8"))
+    try:
+        raw_data = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise StorageReadError(f"Archive file not found: {path}") from exc
+    except OSError as exc:
+        raise StorageReadError(f"Failed to read archive file: {path}") from exc
+
+    try:
+        return RawArchive.model_validate_json(raw_data)
+    except ValidationError as exc:
+        raise StorageValidationError(f"Archive file has invalid structure: {path}") from exc
+    except ValueError as exc:
+        raise StorageValidationError(f"Archive file is not valid JSON: {path}") from exc
 
 
 def save_full_archive(chat_dir: Path, archive: RawArchive) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
 
     path = chat_dir / "full_archive.txt"
-    path.write_text(render_full_archive(archive.messages), encoding="utf-8")
+
+    try:
+        path.write_text(render_full_archive(archive.messages), encoding="utf-8")
+    except OSError as exc:
+        raise StorageWriteError(f"Failed to write full archive text file: {path}") from exc
+
     return path
 
 
@@ -73,8 +108,11 @@ def plan_chunks(archive: RawArchive, max_chars: int, soft_min_chars: int) -> lis
 def save_chunks(chat_dir: Path, archive: RawArchive, max_chars: int, soft_min_chars: int) -> tuple[Path, list]:
     _, chunks_dir = ensure_output_chat_paths(chat_dir)
 
-    for existing in chunks_dir.glob("*.txt"):
-        existing.unlink()
+    try:
+        for existing in chunks_dir.glob("*.txt"):
+            existing.unlink()
+    except OSError as exc:
+        raise StorageWriteError(f"Failed to clean chunks directory: {chunks_dir}") from exc
 
     drafts = build_chunk_drafts(
         messages=archive.messages,
@@ -82,8 +120,12 @@ def save_chunks(chat_dir: Path, archive: RawArchive, max_chars: int, soft_min_ch
         soft_min_chars=soft_min_chars,
     )
 
-    for draft in drafts:
-        (chunks_dir / (draft.file_name or "chunk.txt")).write_text(draft.text, encoding="utf-8")
+    try:
+        for draft in drafts:
+            file_name = draft.file_name or "chunk.txt"
+            (chunks_dir / file_name).write_text(draft.text, encoding="utf-8")
+    except OSError as exc:
+        raise StorageWriteError(f"Failed to write chunk files into: {chunks_dir}") from exc
 
     return chunks_dir, build_chunk_summary(drafts)
 
@@ -91,7 +133,8 @@ def save_chunks(chat_dir: Path, archive: RawArchive, max_chars: int, soft_min_ch
 def build_summary(archive: RawArchive, chunks_info: list) -> Summary:
     authors = {message.author for message in archive.messages}
     text_messages = sum(
-        1 for message in archive.messages
+        1
+        for message in archive.messages
         if message.text and not message.text.startswith("[empty message]")
     )
     service_messages = sum(1 for message in archive.messages if message.is_service)
@@ -118,34 +161,13 @@ def save_summary(chat_dir: Path, summary: Summary) -> Path:
     chat_dir, _ = ensure_output_chat_paths(chat_dir)
 
     path = chat_dir / "summary.json"
-    path.write_text(
-        json.dumps(summary.model_dump(mode="json"), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+
+    try:
+        path.write_text(
+            json.dumps(summary.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise StorageWriteError(f"Failed to write summary file: {path}") from exc
+
     return path
-
-
-def save_selected_dialogs(state_dir: Path, dialogs: list[SelectedDialogState]) -> Path:
-    path = ensure_state_path(state_dir)
-
-    payload = {
-        "saved_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "dialogs": [dialog.model_dump(mode="json") for dialog in dialogs],
-    }
-
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return path
-
-
-def load_selected_dialogs(state_dir: Path) -> list[SelectedDialogState]:
-    path = ensure_state_path(state_dir)
-
-    if not path.exists():
-        return []
-
-    data = json.loads(path.read_text(encoding="utf-8"))
-    dialogs = data.get("dialogs", [])
-    return [SelectedDialogState.model_validate(item) for item in dialogs]
