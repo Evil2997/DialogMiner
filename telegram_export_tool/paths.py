@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Final
 
 from telegram_export_tool.constants import (
     CHUNKS_DIR_NAME,
@@ -11,7 +12,7 @@ from telegram_export_tool.constants import (
     SUMMARY_FILE_NAME,
 )
 
-MAIN_DIR = Path(__file__).resolve().parents[1]
+MAIN_DIR: Final[Path] = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = MAIN_DIR / OUTPUT_DIR_NAME
 DEFAULT_STATE_DIR = MAIN_DIR / STATE_DIR_NAME
 
