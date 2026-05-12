@@ -1,3 +1,22 @@
+# Environment
 .env
+.venv/
+
+# Telegram session files
 *.session
-.idea
+*.session-journal
+
+# Runtime output (generated data, not source code)
+output/
+state/
+
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
