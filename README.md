@@ -1,49 +1,47 @@
 # DialogMiner
 
-CLI-инструмент для экспорта истории Telegram-чатов через пользовательскую сессию (не бот). Сохраняет переписку в виде структурированного архива и нарезает её на текстовые чанки, удобные для подачи в LLM.
+CLI tool for exporting Telegram chat history via a user session (not a bot). Saves conversations as structured archives and splits them into text chunks sized for LLM context windows.
 
 ---
 
-## Что умеет
+## What it does
 
-- Подключается к Telegram через пользовательскую сессию (Telethon)
-- Сканирует список диалогов и позволяет выбрать нужные
-- Экспортирует историю чата с фильтрацией по дате (`--since`, `--until`)
-- Сохраняет три формата вывода:
-  - `raw_messages.json` — полный архив в JSON для переиспользования
-  - `full_archive.txt` — вся история в читаемом текстовом виде
-  - `chunks/` — история, разбитая на части по месяцам, с учётом лимитов LLM-контекста
-- Формирует `summary.json` — статистика по чату (авторы, медиа, форварды, количество чанков)
-- Позволяет перестроить чанки из уже сохранённого архива без повторных запросов к Telegram
+- Connects to Telegram via a user session (Telethon)
+- Scans dialog list and lets you select the ones you need
+- Exports chat history with optional date filtering (`--since`, `--until`)
+- Saves three output formats:
+  - `raw_messages.json` — full archive in JSON for reuse
+  - `full_archive.txt` — entire history as readable plain text
+  - `chunks/` — history split into monthly parts, respecting LLM context limits
+- Generates `summary.json` — chat statistics (authors, media, forwards, chunk count)
+- Allows rebuilding chunks from an existing archive without re-fetching from Telegram
 
 ---
 
-## Стек
+## Stack
 
 - **Python 3.11+**
-- [Telethon](https://github.com/LonamiWebs/Telethon) — Telegram MTProto клиент
+- [Telethon](https://github.com/LonamiWebs/Telethon) — Telegram MTProto client
 - [Typer](https://typer.tiangolo.com/) — CLI
-- [Rich](https://github.com/Textualize/rich) — красивый вывод в терминале
-- [Pydantic](https://docs.pydantic.dev/) + [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) — модели и конфиг из `.env`
-- [uv](https://github.com/astral-sh/uv) — управление зависимостями
+- [Rich](https://github.com/Textualize/rich) — terminal output
+- [Pydantic](https://docs.pydantic.dev/) + [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) — models and `.env` config
+- [uv](https://github.com/astral-sh/uv) — dependency management
 
 ---
 
-## Установка
+## Installation
 
 ```bash
 git clone https://github.com/Evil2997/DialogMiner.git
 cd DialogMiner
-
-# Установить зависимости через uv
 uv sync
 ```
 
 ---
 
-## Настройка
+## Configuration
 
-Скопируй `.env.example` в `.env` и заполни:
+Copy `.env.example` to `.env` and fill in your credentials:
 
 ```bash
 cp .env.example .env
@@ -53,75 +51,69 @@ cp .env.example .env
 TG_API_ID=123456
 TG_API_HASH=0123456789abcdef0123456789abcdef
 TG_PHONE=+79001234567
-TG_SESSION_NAME=my_session   # опционально, по умолчанию telegram_export_session
+TG_SESSION_NAME=my_session   # optional, default: telegram_export_session
 ```
 
-`TG_API_ID` и `TG_API_HASH` можно получить на [my.telegram.org](https://my.telegram.org/apps).
+`TG_API_ID` and `TG_API_HASH` are available at [my.telegram.org](https://my.telegram.org/apps).
 
-При первом запуске Telethon запросит код подтверждения и создаст файл сессии рядом с проектом.
+On first run Telethon will prompt for a confirmation code and create a session file.
 
 ---
 
-## Использование
+## Usage
 
-### 1. Просмотр доступных диалогов
+### 1. Scan available dialogs
 
 ```bash
 uv run python main.py scan-dialogs
 uv run python main.py scan-dialogs --limit 200
 ```
 
-Выводит таблицу диалогов с номерами, названиями и ID. Результат кешируется локально.
+Prints a table with dialog numbers, titles, and IDs. Result is cached locally.
 
-### 2. Сохранить нужные диалоги по номеру из таблицы
+### 2. Save dialogs by number
 
 ```bash
 uv run python main.py save-dialogs 1 5 12
 ```
 
-### 3. Посмотреть сохранённые диалоги
+### 3. List saved dialogs
 
 ```bash
 uv run python main.py list-saved
 ```
 
-### 4. Экспортировать конкретный чат
+### 4. Export a specific chat
 
 ```bash
-# По username или ID
 uv run python main.py export-chat --chat @username
 uv run python main.py export-chat --chat 123456789
-
-# С фильтром по дате
 uv run python main.py export-chat --chat @username --since 2024-01-01 --until 2024-06-30
 ```
 
-### 5. Экспортировать все сохранённые диалоги
+### 5. Export all saved dialogs
 
 ```bash
 uv run python main.py export-saved
 ```
 
-### 6. Перестроить чанки без обращения к Telegram
+### 6. Rebuild chunks without fetching from Telegram
 
 ```bash
-# Из конкретного архива
 uv run python main.py build-chunks --raw-json output/chatname/raw_messages.json
-
-# По всем сохранённым диалогам (если архивы уже есть)
 uv run python main.py build-chunks
 ```
 
 ---
 
-## Структура вывода
+## Output structure
 
 ```
 output/
 └── chat-slug/
-    ├── raw_messages.json      # полный архив (JSON)
-    ├── full_archive.txt       # вся история (текст)
-    ├── summary.json           # статистика
+    ├── raw_messages.json
+    ├── full_archive.txt
+    ├── summary.json
     └── chunks/
         ├── 01.2024-02.2024.txt
         ├── 03.2024-03.2024_part1.txt
@@ -129,16 +121,10 @@ output/
         └── ...
 ```
 
-Чанки нарезаются по месяцам. Если месяц слишком большой — делится на части. Маленькие соседние месяцы объединяются. Лимиты: мягкий минимум 90 000 символов, жёсткий максимум 180 000 символов на чанк.
+Chunks are split by month. Large months are divided into parts; small adjacent months are merged. Soft minimum: 90,000 characters. Hard maximum: 180,000 characters per chunk.
 
 ---
 
-## Зачем это нужно
+## Why
 
-Основной сценарий — подготовка истории переписки для анализа через LLM (ChatGPT, Claude и др.). Чанки по размеру подогнаны под стандартные контекстные окна, а `summary.json` позволяет быстро ориентироваться в архиве.
-
----
-
-## Лицензия
-
-MIT
+The primary use case is preparing chat history for LLM analysis (ChatGPT, Claude, etc.). Chunks are sized to fit standard context windows, and `summary.json` helps navigate the archive quickly.
